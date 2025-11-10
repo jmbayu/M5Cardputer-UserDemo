@@ -41,4 +41,5 @@ private:
     void handle_enter_key();
     void start_recording();
     void start_playback();
+    void save_recording();
 };
