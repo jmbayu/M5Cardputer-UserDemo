@@ -6,6 +6,9 @@
 #include "app_record.h"
 #include "assets/record_big.h"
 #include "assets/record_small.h"
+#include <iostream>
+#include <fstream>
+#include <string>
 #include <apps/utils/audio/audio.h>
 #include <apps/utils/common.h>
 #include <apps/utils/theme.h>
@@ -35,6 +38,8 @@ void AppRecord::onOpen()
 
     audio::set_keyboard_sfx_enable(false);
 
+    GetHAL().sd_card_init();
+
     _rec_data = new int16_t[RECORD_SIZE]();
 
     start_recording();
@@ -52,6 +57,9 @@ void AppRecord::onRunning()
     if (key_event.state == true) {
         if (key_event.keyCode == KEY_ENTER) {
             handle_enter_key();
+        }
+        else if (key_event.keyCode == KEY_SPACE) {
+            save_recording();
         }
     }
 
@@ -144,7 +152,7 @@ void AppRecord::render_page_recording()
     GetHAL().canvas.setTextColor(TFT_ORANGE, THEME_COLOR_BG);
     GetHAL().canvas.setCursor(10, 0);
     GetHAL().canvas.setTextSize(1);
-    GetHAL().canvas.print("Press enter to play");
+    GetHAL().canvas.print("Press enter to play, space to save");
     GetHAL().pushCanvas();
 }
 
@@ -220,4 +228,72 @@ void AppRecord::render_waveform()
 void AppRecord::handle_enter_key()
 {
     start_playback();
+}
+
+void AppRecord::save_recording()
+{
+    if (!_rec_data) {
+        return;
+    }
+
+    // Display saving message
+    GetHAL().canvas.fillScreen(THEME_COLOR_BG);
+    GetHAL().canvas.setTextColor(TFT_ORANGE, THEME_COLOR_BG);
+    GetHAL().canvas.setCursor(10, 0);
+    GetHAL().canvas.setTextSize(1);
+    GetHAL().canvas.print("Saving...");
+    GetHAL().pushCanvas();
+
+    // Open file
+    std::ofstream file("/sdcard/recording.wav", std::ios::binary);
+    if (!file.is_open()) {
+        GetHAL().canvas.fillScreen(THEME_COLOR_BG);
+        GetHAL().canvas.setTextColor(TFT_RED, THEME_COLOR_BG);
+        GetHAL().canvas.setCursor(10, 0);
+        GetHAL().canvas.setTextSize(1);
+        GetHAL().canvas.print("Failed to open file");
+        GetHAL().pushCanvas();
+        GetHAL().delay(2000);
+        render_page_recording();
+        return;
+    }
+
+    // Write WAV header
+    const int sampleRate = RECORD_SAMPLERATE;
+    const int numChannels = 1;
+    const int bitsPerSample = 16;
+    const int dataSize = RECORD_SIZE * sizeof(int16_t);
+    const int fileSize = 36 + dataSize;
+
+    file.write("RIFF", 4);
+    file.write(reinterpret_cast<const char*>(&fileSize), 4);
+    file.write("WAVE", 4);
+    file.write("fmt ", 4);
+    int subchunk1Size = 16;
+    file.write(reinterpret_cast<const char*>(&subchunk1Size), 4);
+    short audioFormat = 1;
+    file.write(reinterpret_cast<const char*>(&audioFormat), 2);
+    file.write(reinterpret_cast<const char*>(&numChannels), 2);
+    file.write(reinterpret_cast<const char*>(&sampleRate), 4);
+    int byteRate = sampleRate * numChannels * bitsPerSample / 8;
+    file.write(reinterpret_cast<const char*>(&byteRate), 4);
+    short blockAlign = numChannels * bitsPerSample / 8;
+    file.write(reinterpret_cast<const char*>(&blockAlign), 2);
+    file.write(reinterpret_cast<const char*>(&bitsPerSample), 2);
+    file.write("data", 4);
+    file.write(reinterpret_cast<const char*>(&dataSize), 4);
+
+    // Write audio data
+    file.write(reinterpret_cast<const char*>(_rec_data), dataSize);
+    file.close();
+
+    // Display success message
+    GetHAL().canvas.fillScreen(THEME_COLOR_BG);
+    GetHAL().canvas.setTextColor(TFT_GREEN, THEME_COLOR_BG);
+    GetHAL().canvas.setCursor(10, 0);
+    GetHAL().canvas.setTextSize(1);
+    GetHAL().canvas.print("Saved to /sdcard/recording.wav");
+    GetHAL().pushCanvas();
+    GetHAL().delay(2000);
+    render_page_recording();
 }
